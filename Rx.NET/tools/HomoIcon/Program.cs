@@ -26,16 +26,34 @@ namespace HomoIconize
                 return;
             }
 
-            Process(root, "System.Reactive.Linq", "System.Reactive.Providers", @"Reactive\Linq\Qbservable.Generated.cs", "System.Reactive.Linq.Observable", "Qbservable", true);
+            Process(root, 
+                "System.Reactive.Linq", 
+                "System.Reactive.Providers", 
+                @"Reactive\Linq\Qbservable.Generated.cs", 
+                "System.Reactive.Linq.Observable", "Qbservable", true);
             Console.WriteLine();
 
-            Process(root, "System.Reactive.Experimental", "System.Reactive.Experimental", @"Reactive\Linq\QbservableEx.Generated.cs", "System.Reactive.Linq.ObservableEx", "QbservableEx");            
+            Process(root, 
+                "System.Reactive.Experimental", 
+                "System.Reactive.Experimental", 
+                @"Reactive\Linq\QbservableEx.Generated.cs", 
+                "System.Reactive.Linq.ObservableEx", "QbservableEx");            
             Console.WriteLine();
+
+            Process(root, 
+                "System.Reactive.Observable.Aliases", 
+                "System.Reactive.Observable.Aliases", 
+                "Qbservable.Aliases.Generated.cs", 
+                "System.Reactive.Observable.Aliases.Observable", "QbservableAliases",
+                includeAsync: false, useAttribute: true);
+            Console.WriteLine();
+
+            Console.WriteLine("Processing complete, press enter to continue.");
+            Console.ReadLine();
         }
 
-        static void Process(string root, string sourceAssembly, string targetAssembly, string targetFile, string sourceTypeName, string targetTypeName, bool includeAsync = false)
+        static void Process(string root, string sourceAssembly, string targetAssembly, string targetFile, string sourceTypeName, string targetTypeName, bool includeAsync = false, bool useAttribute = false)
         {
-
             var rxRoot = Path.Combine(root, sourceAssembly);
             if (!Directory.Exists(rxRoot))
             {
@@ -71,7 +89,7 @@ namespace HomoIconize
                 return;
             }
 
-            Generate(dll, xml, qbsgen, sourceTypeName, targetTypeName, includeAsync);
+            Generate(dll, xml, qbsgen, sourceTypeName, targetTypeName, includeAsync, useAttribute);
         }
 
         // Prototype interface to break dependencies. Only used for ToString2 ultimately.
@@ -79,7 +97,7 @@ namespace HomoIconize
         {
         }
 
-        static void Generate(string input, string xml, string output, string sourceTypeName, string targetTypeName, bool includeAsync)
+        static void Generate(string input, string xml, string output, string sourceTypeName, string targetTypeName, bool includeAsync, bool useAttribute)
         {
             var docs = XDocument.Load(xml).Root.Element("members").Elements("member").ToDictionary(m => m.Attribute("name").Value, m => m);
 
@@ -127,14 +145,14 @@ namespace HomoIconize
             {
                 using (Out = new StreamWriter(fs))
                 {
-                    Generate(t, docs, targetTypeName, includeAsync);
+                    Generate(t, docs, targetTypeName, includeAsync, useAttribute);
                 }
             }
         }
 
         static Type _qbs;
 
-        static void Generate(Type t, IDictionary<string, XElement> docs, string typeName, bool includeAsync)
+        static void Generate(Type t, IDictionary<string, XElement> docs, string typeName, bool includeAsync, bool useAttribute)
         {
             WriteLine(
 @"/*
@@ -172,6 +190,13 @@ using System.Runtime.Remoting.Lifetime;
 {");
 
             Indent();
+
+            if (useAttribute)
+            {
+                Indent();
+                WriteLine(
+@"[LocalQueryMethodImplementationTypeAttribute(typeof (" + typeName + "))]");
+            }
 
             WriteLine(
 @"public static partial class " + typeName + @"
@@ -268,9 +293,16 @@ using System.Runtime.Remoting.Lifetime;
                         var isObs = new Func<Type, bool>(tt => tt.IsGenericType && tt.GetGenericTypeDefinition() == typeof(IObservable<>));
                         var isEnm = new Func<Type, bool>(tt => tt.IsGenericType && tt.GetGenericTypeDefinition() == typeof(IEnumerable<>));
                         if (isObs(pt) || pt.IsArray && isObs(pt.GetElementType()) || isEnm(pt) || pt.IsArray && isEnm(pt.GetElementType()))
-                            args.Add("GetSourceExpression(" + q.Name + ")");
+                        {
+                            if (useAttribute)
+                                args.Add("Qbservable.GetSourceExpression(" + q.Name + ")");
+                            else
+                                args.Add("GetSourceExpression(" + q.Name + ")");
+                        }
                         else
+                        {
                             args.Add("Expression.Constant(" + q.Name + ", typeof(" + pt.ToString2() + "))");
+                        }
                     }
 
                     var pts = pt.ToString2();
